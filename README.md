@@ -13,6 +13,20 @@ pnpm dev
 
 浏览器打开 `http://localhost:3000`。
 
+开发环境未配置认证变量时，可使用用户名 `admin`、密码 `jialiyou` 登录。
+
+## 用户认证
+
+生产运行前设置以下环境变量（可参考 `.env.example`）：
+
+```bash
+AUTH_USERNAME=family
+AUTH_PASSWORD=请替换为强密码
+AUTH_SECRET=请替换为足够长的随机字符串
+```
+
+可以用 `openssl rand -base64 32` 生成 `AUTH_SECRET`。登录状态保存在签名的 HttpOnly Cookie 中，默认有效期为 7 天。生产环境不会启用开发用默认账号；缺少任一变量时，登录页会提示认证尚未配置。
+
 ## 生产运行
 
 ```bash

@@ -37,7 +37,7 @@ function statusTone(item: InventoryItem) {
   return "orange";
 }
 
-export default function InventoryApp() {
+export default function InventoryApp({ username }: { username: string }) {
   const [data, setData] = useState<HomeData>({ items: [], shopping: [] });
   const [view, setView] = useState<View>("today");
   const [loading, setLoading] = useState(true);
@@ -50,6 +50,7 @@ export default function InventoryApp() {
   const loadData = useCallback(async () => {
     try {
       const response = await fetch("/api/home", { cache: "no-store" });
+      if (response.status === 401) { window.location.replace("/login"); return; }
       const payload = await response.json() as HomeData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "加载失败");
       setData(payload);
@@ -70,6 +71,7 @@ export default function InventoryApp() {
 
   const mutate = async (method: "POST" | "PATCH" | "DELETE", body: unknown, success: string) => {
     const response = await fetch("/api/home", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (response.status === 401) { window.location.replace("/login"); throw new Error("登录已过期"); }
     const payload = await response.json() as { error?: string };
     if (!response.ok) throw new Error(payload.error || "操作失败");
     await loadData();
@@ -124,13 +126,14 @@ export default function InventoryApp() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom"><div className="family-avatars"><span>陈</span><span>林</span><i>＋</i></div><p>我们的家</p><small>2 位成员 · 数据已同步</small></div>
+        <div className="sidebar-bottom"><div className="family-avatars"><span>{username.slice(0, 1).toUpperCase()}</span></div><p>{username}</p><small>已安全登录</small><form action="/api/auth/logout" method="post"><button className="logout-button">退出登录</button></form></div>
       </aside>
 
       <section className="content">
         <header className="topbar">
           <div><p className="eyebrow">{today}</p><h1>{view === "today" ? "早上好，今天家里还好吗？" : viewNames[view]}</h1></div>
           <div className="top-actions">
+            <form className="mobile-logout" action="/api/auth/logout" method="post"><button aria-label="退出登录" title="退出登录">↪</button></form>
             <button className="search-button" aria-label="搜索物品" onClick={() => openItems(false)}>⌕</button>
             <button className="add-button" onClick={() => setModal("item")}>＋ <span>记一件</span></button>
           </div>

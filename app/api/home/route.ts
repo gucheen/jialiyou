@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ function nextId(records: Array<{ id: number }>) {
 }
 
 export async function GET() {
+  if (!(await getCurrentUser())) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   try {
     return NextResponse.json(await readStore());
   } catch (error) {
@@ -40,6 +42,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!(await getCurrentUser())) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   try {
     const body = await request.json() as Record<string, unknown>;
     const store = await readStore();
@@ -73,6 +76,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  if (!(await getCurrentUser())) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   try {
     const body = await request.json() as Record<string, unknown>;
     const id = Number(body.id);
@@ -102,6 +106,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!(await getCurrentUser())) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   try {
     const body = await request.json() as Record<string, unknown>;
     const id = Number(body.id);
