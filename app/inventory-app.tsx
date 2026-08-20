@@ -6,7 +6,8 @@ type View = "today" | "items" | "shopping" | "spaces";
 type ItemState = "充足" | "不多了" | "快用完" | "已用完";
 type InventoryItem = { id: number; name: string; icon: string; location: string; state: ItemState; expiresOn: string | null; updatedAt: string };
 type ShoppingItem = { id: number; name: string; quantity: string; checked: number | boolean };
-type HomeData = { items: InventoryItem[]; shopping: ShoppingItem[] };
+type Movement = { id: number; itemId: number; itemName: string; fromLocation: string; toLocation: string; movedAt: string; movedBy: string; undoneAt?: string };
+type HomeData = { items: InventoryItem[]; shopping: ShoppingItem[]; movements: Movement[] };
 
 const stateOrder: ItemState[] = ["充足", "不多了", "快用完", "已用完"];
 const viewNames: Record<View, string> = { today: "今天", items: "全部物品", shopping: "购物清单", spaces: "空间" };
@@ -38,14 +39,16 @@ function statusTone(item: InventoryItem) {
 }
 
 export default function InventoryApp({ username }: { username: string }) {
-  const [data, setData] = useState<HomeData>({ items: [], shopping: [] });
+  const [data, setData] = useState<HomeData>({ items: [], shopping: [], movements: [] });
   const [view, setView] = useState<View>("today");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [modal, setModal] = useState<"item" | "shopping" | "audit" | null>(null);
+  const [movingItem, setMovingItem] = useState<InventoryItem | null>(null);
   const [toast, setToast] = useState("");
+  const [undoMovement, setUndoMovement] = useState<Movement | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -53,7 +56,7 @@ export default function InventoryApp({ username }: { username: string }) {
       if (response.status === 401) { window.location.replace("/login"); return; }
       const payload = await response.json() as HomeData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "加载失败");
-      setData(payload);
+      setData({ ...payload, movements: payload.movements ?? [] });
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "加载失败");
@@ -65,9 +68,9 @@ export default function InventoryApp({ username }: { username: string }) {
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 2200);
+    const timer = window.setTimeout(() => { setToast(""); setUndoMovement(null); }, undoMovement ? 5000 : 2200);
     return () => window.clearTimeout(timer);
-  }, [toast]);
+  }, [toast, undoMovement]);
 
   const mutate = async (method: "POST" | "PATCH" | "DELETE", body: unknown, success: string) => {
     const response = await fetch("/api/home", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -75,7 +78,35 @@ export default function InventoryApp({ username }: { username: string }) {
     const payload = await response.json() as { error?: string };
     if (!response.ok) throw new Error(payload.error || "操作失败");
     await loadData();
+    setUndoMovement(null);
     setToast(success);
+  };
+
+  const moveItem = async (item: InventoryItem, toLocation: string) => {
+    const response = await fetch("/api/home", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "movement", id: item.id, toLocation }) });
+    if (response.status === 401) { window.location.replace("/login"); throw new Error("登录已过期"); }
+    const payload = await response.json() as { error?: string; movement?: Movement };
+    if (!response.ok || !payload.movement) throw new Error(payload.error || "移动失败");
+    await loadData();
+    setMovingItem(null);
+    setUndoMovement(payload.movement);
+    setToast(`“${item.name}”已移动到 ${payload.movement.toLocation}`);
+  };
+
+  const undoMove = async () => {
+    if (!undoMovement) return;
+    const movement = undoMovement;
+    setUndoMovement(null);
+    try {
+      const response = await fetch("/api/home", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "undo-movement", id: movement.id }) });
+      if (response.status === 401) { window.location.replace("/login"); return; }
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) { setToast(payload.error || "撤销失败"); return; }
+      await loadData();
+      setToast(`已放回 ${movement.fromLocation}`);
+    } catch {
+      setToast("撤销失败，请稍后重试");
+    }
   };
 
   const openItems = (needsAttention = false) => {
@@ -112,6 +143,8 @@ export default function InventoryApp({ username }: { username: string }) {
     });
     return Array.from(groups.entries());
   }, [data.items]);
+  const allLocations = useMemo(() => Array.from(new Set(data.items.map((item) => item.location))).sort((a, b) => a.localeCompare(b, "zh-CN")), [data.items]);
+  const recentLocations = useMemo(() => Array.from(new Set(data.movements.filter((movement) => !movement.undoneAt).map((movement) => movement.toLocation))), [data.movements]);
 
   const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
 
@@ -142,7 +175,7 @@ export default function InventoryApp({ username }: { username: string }) {
         {loading ? <LoadingState /> : error ? <ErrorState message={error} retry={loadData} /> : (
           <>
             {view === "today" && <TodayView items={attentionItems} shopping={activeShopping} openItems={openItems} setModal={setModal} changeState={changeState} toggleShopping={toggleShopping} />}
-            {view === "items" && <ItemsView items={filteredItems} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
+            {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
             {view === "shopping" && <ShoppingView items={data.shopping} toggle={toggleShopping} add={() => setModal("shopping")} remove={(item) => mutate("DELETE", { type: "shopping", id: item.id }, "已移除清单项")} />}
             {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setView("items"); setQuery(room); setAttentionOnly(false); }} />}
           </>
@@ -152,7 +185,8 @@ export default function InventoryApp({ username }: { username: string }) {
       {modal === "item" && <ItemModal close={() => setModal(null)} save={async (body) => { await mutate("POST", body, "已经记下来了"); setModal(null); }} />}
       {modal === "shopping" && <ShoppingModal close={() => setModal(null)} save={async (body) => { await mutate("POST", body, "已加入购物清单"); setModal(null); }} />}
       {modal === "audit" && <AuditModal items={data.items.slice(0, 6)} close={() => setModal(null)} changeState={changeState} />}
-      {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {movingItem && <MoveModal item={movingItem} recentLocations={recentLocations} allLocations={allLocations} close={() => setMovingItem(null)} move={moveItem} />}
+      {toast && <div className="toast" role="status"><span>✓</span>{toast}{undoMovement && <button onClick={() => void undoMove()}>撤销</button>}</div>}
     </main>
   );
 }
@@ -180,22 +214,30 @@ function TodayView({ items, shopping, openItems, setModal, changeState, toggleSh
   </>;
 }
 
-function ItemsView({ items, query, setQuery, attentionOnly, setAttentionOnly, changeState, remove }: { items: InventoryItem[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; setAttentionOnly: (value: boolean) => void; changeState: (item: InventoryItem, state?: ItemState) => void; remove: (item: InventoryItem) => void }) {
-  return <section className="full-panel">
+function ItemsView({ items, movements, query, setQuery, attentionOnly, setAttentionOnly, changeState, move, remove }: { items: InventoryItem[]; movements: Movement[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; setAttentionOnly: (value: boolean) => void; changeState: (item: InventoryItem, state?: ItemState) => void; move: (item: InventoryItem) => void; remove: (item: InventoryItem) => void }) {
+  return <>
+  <section className="full-panel">
     <div className="list-tools"><label className="search-field"><span>⌕</span><input autoFocus placeholder="搜索名称、位置或状态" value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className={`filter-button ${attentionOnly ? "selected" : ""}`} onClick={() => setAttentionOnly(!attentionOnly)}>只看需留意</button></div>
     <div className="table-head"><span>物品</span><span>位置</span><span>状态</span><span></span></div>
-    <div className="full-list">{items.map((item) => <ItemRow item={item} key={item.id} changeState={changeState} remove={remove} expanded />)}{!items.length && <EmptyMini text="没有找到符合条件的物品" />}</div>
-  </section>;
+    <div className="full-list">{items.map((item) => <ItemRow item={item} key={item.id} changeState={changeState} move={move} remove={remove} expanded />)}{!items.length && <EmptyMini text="没有找到符合条件的物品" />}</div>
+  </section>
+  <MovementHistory movements={movements} />
+  </>;
 }
 
-function ItemRow({ item, changeState, remove, expanded = false }: { item: InventoryItem; changeState: (item: InventoryItem, state?: ItemState) => void; remove?: (item: InventoryItem) => void; expanded?: boolean }) {
+function ItemRow({ item, changeState, move, remove, expanded = false }: { item: InventoryItem; changeState: (item: InventoryItem, state?: ItemState) => void; move?: (item: InventoryItem) => void; remove?: (item: InventoryItem) => void; expanded?: boolean }) {
   const expiry = expiryText(item.expiresOn);
   return <article className={`item-row ${expanded ? "expanded" : ""}`}>
     <div className="item-icon">{item.icon}</div><div className="item-copy"><h4>{item.name}</h4>{!expanded && <p>{item.location}</p>}</div>
     {expanded && <p className="location-cell">{item.location}</p>}
     <button className={`status ${statusTone(item)}`} onClick={() => changeState(item)} title="点击切换库存状态">{expiry && (daysUntil(item.expiresOn) ?? 999) <= 30 ? expiry : item.state}</button>
-    {remove ? <button className="delete-button" onClick={() => remove(item)} aria-label={`移除${item.name}`}>×</button> : <button className="more" onClick={() => changeState(item)} aria-label={`${item.name}切换状态`}>•••</button>}
+    {remove && move ? <div className="item-actions"><button className="move-button" onClick={() => move(item)}>移动</button><button className="delete-button" onClick={() => remove(item)} aria-label={`移除${item.name}`}>×</button></div> : <button className="more" onClick={() => changeState(item)} aria-label={`${item.name}切换状态`}>•••</button>}
   </article>;
+}
+
+function MovementHistory({ movements }: { movements: Movement[] }) {
+  if (!movements.length) return null;
+  return <details className="movement-history"><summary>最近移动记录 <span>{movements.length}</span></summary><div>{movements.slice(0, 8).map((movement) => <article className={movement.undoneAt ? "undone" : ""} key={movement.id}><span className="movement-dot">→</span><div><strong>{movement.itemName}</strong><p>{movement.fromLocation} <b>→</b> {movement.toLocation}</p></div><small>{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(movement.movedAt))}{movement.undoneAt ? " · 已撤销" : ""}</small></article>)}</div></details>;
 }
 
 function ShoppingView({ items, toggle, add, remove }: { items: ShoppingItem[]; toggle: (item: ShoppingItem) => void; add: () => void; remove: (item: ShoppingItem) => void }) {
@@ -214,6 +256,15 @@ function ItemModal({ close, save }: { close: () => void; save: (body: ItemInputP
   return <Modal title="记一件家里的东西" subtitle="只填名称和位置也完全可以" close={close}><form onSubmit={submit} className="modal-form"><label>物品名称<input name="name" required autoFocus placeholder="例如：黑胡椒" /></label><fieldset><legend>选择一个图标</legend><div className="icon-choices">{["📦","🥛","🥫","🧴","💊","🔋","🧻","🧸"].map((value) => <button type="button" className={icon === value ? "selected" : ""} onClick={() => setIcon(value)} key={value}>{value}</button>)}</div></fieldset><label>放在哪里<input name="location" required placeholder="例如：厨房 · 吊柜" /></label><div className="form-row"><label>现在有多少<select name="state" defaultValue="充足">{stateOrder.map((state) => <option key={state}>{state}</option>)}</select></label><label>到期日（可不填）<input type="date" name="expiresOn" /></label></div>{message && <p className="form-error">{message}</p>}<button className="primary-submit" disabled={saving}>{saving ? "正在记下…" : "记好了"}</button></form></Modal>;
 }
 type ItemInputPayload = { type: "item"; name: string; icon: string; location: string; state: ItemState; expiresOn: string | null };
+
+function MoveModal({ item, recentLocations, allLocations, close, move }: { item: InventoryItem; recentLocations: string[]; allLocations: string[]; close: () => void; move: (item: InventoryItem, toLocation: string) => Promise<void> }) {
+  const suggestions = Array.from(new Set([...recentLocations, ...allLocations])).filter((location) => location !== item.location);
+  const [location, setLocation] = useState(suggestions[0] ?? "");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setSaving(true); setMessage(""); try { await move(item, location.trim()); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "移动失败"); setSaving(false); } };
+  return <Modal title={`移动“${item.name}”`} subtitle={`现在放在 ${item.location}`} close={close}><form className="modal-form move-form" onSubmit={submit}>{suggestions.length > 0 && <fieldset><legend>最近和常用位置</legend><div className="location-choices">{suggestions.slice(0, 4).map((value) => <button type="button" className={location === value ? "selected" : ""} onClick={() => setLocation(value)} key={value}>{value}</button>)}</div></fieldset>}<label>移动到<input required autoFocus={!suggestions.length} list="known-locations" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="例如：客厅 · 边柜" /><datalist id="known-locations">{allLocations.filter((value) => value !== item.location).map((value) => <option value={value} key={value} />)}</datalist></label>{message && <p className="form-error">{message}</p>}<button className="primary-submit" disabled={saving || !location.trim()}>{saving ? "正在移动…" : "确认移动"}</button></form></Modal>;
+}
 
 function ShoppingModal({ close, save }: { close: () => void; save: (body: { type: "shopping"; name: string; quantity: string }) => Promise<void> }) {
   const [saving, setSaving] = useState(false); const [message, setMessage] = useState("");
