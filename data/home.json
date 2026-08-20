@@ -1,0 +1,15 @@
+{
+  "items": [
+    { "id": 1, "name": "鲜牛奶", "icon": "🥛", "location": "厨房 · 冰箱冷藏层", "state": "不多了", "expiresOn": "2026-08-24", "updatedAt": "2026-08-20T06:00:00.000Z" },
+    { "id": 2, "name": "厨房纸", "icon": "🧻", "location": "储藏室 · 上层", "state": "充足", "expiresOn": null, "updatedAt": "2026-08-20T06:00:00.000Z" },
+    { "id": 3, "name": "儿童退烧药", "icon": "💊", "location": "客厅 · 药箱", "state": "充足", "expiresOn": "2026-09-19", "updatedAt": "2026-08-20T06:00:00.000Z" },
+    { "id": 4, "name": "洗衣液", "icon": "🧴", "location": "阳台 · 洗衣柜", "state": "快用完", "expiresOn": null, "updatedAt": "2026-08-20T06:00:00.000Z" },
+    { "id": 5, "name": "鸡蛋", "icon": "🥚", "location": "厨房 · 冰箱冷藏层", "state": "不多了", "expiresOn": "2026-08-29", "updatedAt": "2026-08-20T06:00:00.000Z" },
+    { "id": 6, "name": "备用电池", "icon": "🔋", "location": "书房 · 抽屉", "state": "充足", "expiresOn": null, "updatedAt": "2026-08-20T06:00:00.000Z" }
+  ],
+  "shopping": [
+    { "id": 1, "name": "鸡蛋", "quantity": "1盒", "checked": false },
+    { "id": 2, "name": "洗衣液", "quantity": "1瓶", "checked": false },
+    { "id": 3, "name": "香蕉", "quantity": "1把", "checked": false }
+  ]
+}
