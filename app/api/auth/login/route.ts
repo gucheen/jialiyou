@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSessionToken, getAuthConfig, SESSION_COOKIE, SESSION_MAX_AGE, verifyCredentials } from "@/lib/auth";
+import { checkLoginRateLimit, clearLoginFailures, recordLoginFailure } from "@/lib/login-rate-limit";
 
 export async function POST(request: Request) {
   const config = getAuthConfig();
@@ -16,9 +17,18 @@ export async function POST(request: Request) {
 
   const username = String(body.username ?? "").trim();
   const password = String(body.password ?? "");
+  const rateLimit = checkLoginRateLimit(request);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "登录尝试过多，请稍后再试" },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfter) } },
+    );
+  }
   if (!verifyCredentials(username, password)) {
+    recordLoginFailure(rateLimit.key);
     return NextResponse.json({ error: "用户名或密码不正确" }, { status: 401 });
   }
+  clearLoginFailures(rateLimit.key);
 
   const response = NextResponse.json({ ok: true });
   const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();

@@ -1,12 +1,13 @@
-node_modules
-.pnpm-store
+.git
+.github
 .next
-out
-.DS_Store
+node_modules
 npm-debug.log*
 pnpm-debug.log*
 .env
 .env.*
 !.env.example
+Dockerfile*
+README.md
 data/home.json
 data/*.tmp

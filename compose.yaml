@@ -1,0 +1,16 @@
+services:
+  jialiyou:
+    image: ${JIALIYOU_IMAGE:?请设置 JIALIYOU_IMAGE}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JIALIYOU_PORT:-3000}:3000"
+    environment:
+      AUTH_USERNAME: ${AUTH_USERNAME:?请设置 AUTH_USERNAME}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?请设置 AUTH_PASSWORD}
+      AUTH_SECRET: ${AUTH_SECRET:?请设置 AUTH_SECRET}
+    volumes:
+      - jialiyou-data:/app/data
+
+volumes:
+  jialiyou-data:

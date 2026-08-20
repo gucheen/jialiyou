@@ -14,10 +14,24 @@ type Store = { items: InventoryItem[]; shopping: ShoppingItem[]; movements: Move
 
 const dataDir = path.join(process.cwd(), "data");
 const dataPath = path.join(dataDir, "home.json");
+const exampleDataPath = path.join(dataDir, "home.example.json");
 const validStates = new Set<ItemState>(["充足", "不多了", "快用完", "已用完"]);
 
 async function readStore(): Promise<Store> {
-  const contents = await readFile(dataPath, "utf8");
+  let contents: string;
+  try {
+    contents = await readFile(dataPath, "utf8");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    const initialContents = await readFile(exampleDataPath, "utf8");
+    await mkdir(dataDir, { recursive: true });
+    try {
+      await writeFile(dataPath, initialContents, { encoding: "utf8", flag: "wx" });
+    } catch (writeError) {
+      if (!(writeError instanceof Error && "code" in writeError && writeError.code === "EEXIST")) throw writeError;
+    }
+    contents = await readFile(dataPath, "utf8");
+  }
   const store = JSON.parse(contents) as Omit<Store, "movements"> & { movements?: Movement[] };
   return { ...store, movements: Array.isArray(store.movements) ? store.movements : [] };
 }
