@@ -108,6 +108,30 @@ export async function PATCH(request: Request) {
       if (!item) return NextResponse.json({ error: "没有找到这件物品" }, { status: 404 });
       item.state = state;
       item.updatedAt = new Date().toISOString();
+    } else if (body.type === "item-details") {
+      const item = store.items.find((entry) => entry.id === id);
+      if (!item) return NextResponse.json({ error: "没有找到这件物品" }, { status: 404 });
+      const name = String(body.name ?? "").trim();
+      const location = String(body.location ?? "").trim();
+      const state = String(body.state ?? "") as ItemState;
+      const expiresOn = body.expiresOn ? String(body.expiresOn) : null;
+      if (!name) return NextResponse.json({ error: "请填写名称" }, { status: 400 });
+      if (name.length > 100) return NextResponse.json({ error: "物品名称不能超过 100 个字" }, { status: 400 });
+      if (!location) return NextResponse.json({ error: "请填写存放位置" }, { status: 400 });
+      if (location.length > 100) return NextResponse.json({ error: "位置名称不能超过 100 个字" }, { status: 400 });
+      if (!validStates.has(state)) return NextResponse.json({ error: "无效的状态" }, { status: 400 });
+      if (expiresOn && !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) return NextResponse.json({ error: "无效的到期日" }, { status: 400 });
+      const updatedAt = new Date().toISOString();
+      if (location !== item.location) {
+        movement = { id: nextId(store.movements), itemId: item.id, itemName: name, fromLocation: item.location, toLocation: location, movedAt: updatedAt, movedBy: currentUser };
+        store.movements.unshift(movement);
+      }
+      item.name = name;
+      item.icon = String(body.icon ?? "📦").trim() || "📦";
+      item.location = location;
+      item.state = state;
+      item.expiresOn = expiresOn;
+      item.updatedAt = updatedAt;
     } else if (body.type === "shopping") {
       const item = store.shopping.find((entry) => entry.id === id);
       if (!item) return NextResponse.json({ error: "没有找到这条清单" }, { status: 404 });

@@ -10,6 +10,24 @@ type Movement = { id: number; itemId: number; itemName: string; fromLocation: st
 type HomeData = { items: InventoryItem[]; shopping: ShoppingItem[]; movements: Movement[] };
 
 const stateOrder: ItemState[] = ["充足", "不多了", "快用完", "已用完"];
+const itemIconOptions = [
+  { value: "📦", label: "其他" },
+  { value: "🥫", label: "食品" },
+  { value: "🥛", label: "饮品" },
+  { value: "💊", label: "药品" },
+  { value: "🧴", label: "清洁" },
+  { value: "🪥", label: "个护" },
+  { value: "🧻", label: "纸品" },
+  { value: "👕", label: "衣物" },
+  { value: "🍽️", label: "厨具" },
+  { value: "🔧", label: "工具" },
+  { value: "🔌", label: "电器" },
+  { value: "🔋", label: "电池" },
+  { value: "✏️", label: "文具" },
+  { value: "🧸", label: "玩具" },
+  { value: "🐾", label: "宠物" },
+  { value: "🪴", label: "园艺" },
+] as const;
 const viewNames: Record<View, string> = { today: "今天", items: "全部物品", shopping: "购物清单", spaces: "空间" };
 const viewIcons: Record<View, string> = { today: "⌂", items: "▦", shopping: "✓", spaces: "⌑" };
 
@@ -46,6 +64,7 @@ export default function InventoryApp({ username }: { username: string }) {
   const [query, setQuery] = useState("");
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [modal, setModal] = useState<"item" | "shopping" | "audit" | null>(null);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [movingItem, setMovingItem] = useState<InventoryItem | null>(null);
   const [toast, setToast] = useState("");
   const [undoMovement, setUndoMovement] = useState<Movement | null>(null);
@@ -175,7 +194,7 @@ export default function InventoryApp({ username }: { username: string }) {
         {loading ? <LoadingState /> : error ? <ErrorState message={error} retry={loadData} /> : (
           <>
             {view === "today" && <TodayView items={attentionItems} shopping={activeShopping} openItems={openItems} setModal={setModal} changeState={changeState} toggleShopping={toggleShopping} />}
-            {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
+            {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} edit={setEditingItem} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
             {view === "shopping" && <ShoppingView items={data.shopping} toggle={toggleShopping} add={() => setModal("shopping")} remove={(item) => mutate("DELETE", { type: "shopping", id: item.id }, "已移除清单项")} />}
             {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setView("items"); setQuery(room); setAttentionOnly(false); }} />}
           </>
@@ -185,6 +204,7 @@ export default function InventoryApp({ username }: { username: string }) {
       {modal === "item" && <ItemModal close={() => setModal(null)} save={async (body) => { await mutate("POST", body, "已经记下来了"); setModal(null); }} />}
       {modal === "shopping" && <ShoppingModal close={() => setModal(null)} save={async (body) => { await mutate("POST", body, "已加入购物清单"); setModal(null); }} />}
       {modal === "audit" && <AuditModal items={data.items.slice(0, 6)} close={() => setModal(null)} changeState={changeState} />}
+      {editingItem && <ItemModal item={editingItem} close={() => setEditingItem(null)} save={async (body) => { await mutate("PATCH", { ...body, type: "item-details", id: editingItem.id }, `“${body.name.trim()}”已更新`); setEditingItem(null); }} />}
       {movingItem && <MoveModal item={movingItem} recentLocations={recentLocations} allLocations={allLocations} close={() => setMovingItem(null)} move={moveItem} />}
       {toast && <div className="toast" role="status"><span>✓</span>{toast}{undoMovement && <button onClick={() => void undoMove()}>撤销</button>}</div>}
     </main>
@@ -214,24 +234,24 @@ function TodayView({ items, shopping, openItems, setModal, changeState, toggleSh
   </>;
 }
 
-function ItemsView({ items, movements, query, setQuery, attentionOnly, setAttentionOnly, changeState, move, remove }: { items: InventoryItem[]; movements: Movement[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; setAttentionOnly: (value: boolean) => void; changeState: (item: InventoryItem, state?: ItemState) => void; move: (item: InventoryItem) => void; remove: (item: InventoryItem) => void }) {
+function ItemsView({ items, movements, query, setQuery, attentionOnly, setAttentionOnly, changeState, edit, move, remove }: { items: InventoryItem[]; movements: Movement[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; setAttentionOnly: (value: boolean) => void; changeState: (item: InventoryItem, state?: ItemState) => void; edit: (item: InventoryItem) => void; move: (item: InventoryItem) => void; remove: (item: InventoryItem) => void }) {
   return <>
   <section className="full-panel">
     <div className="list-tools"><label className="search-field"><span>⌕</span><input autoFocus placeholder="搜索名称、位置或状态" value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className={`filter-button ${attentionOnly ? "selected" : ""}`} onClick={() => setAttentionOnly(!attentionOnly)}>只看需留意</button></div>
     <div className="table-head"><span>物品</span><span>位置</span><span>状态</span><span></span></div>
-    <div className="full-list">{items.map((item) => <ItemRow item={item} key={item.id} changeState={changeState} move={move} remove={remove} expanded />)}{!items.length && <EmptyMini text="没有找到符合条件的物品" />}</div>
+    <div className="full-list">{items.map((item) => <ItemRow item={item} key={item.id} changeState={changeState} edit={edit} move={move} remove={remove} expanded />)}{!items.length && <EmptyMini text="没有找到符合条件的物品" />}</div>
   </section>
   <MovementHistory movements={movements} />
   </>;
 }
 
-function ItemRow({ item, changeState, move, remove, expanded = false }: { item: InventoryItem; changeState: (item: InventoryItem, state?: ItemState) => void; move?: (item: InventoryItem) => void; remove?: (item: InventoryItem) => void; expanded?: boolean }) {
+function ItemRow({ item, changeState, edit, move, remove, expanded = false }: { item: InventoryItem; changeState: (item: InventoryItem, state?: ItemState) => void; edit?: (item: InventoryItem) => void; move?: (item: InventoryItem) => void; remove?: (item: InventoryItem) => void; expanded?: boolean }) {
   const expiry = expiryText(item.expiresOn);
   return <article className={`item-row ${expanded ? "expanded" : ""}`}>
     <div className="item-icon">{item.icon}</div><div className="item-copy"><h4>{item.name}</h4>{!expanded && <p>{item.location}</p>}</div>
     {expanded && <p className="location-cell">{item.location}</p>}
     <button className={`status ${statusTone(item)}`} onClick={() => changeState(item)} title="点击切换库存状态">{expiry && (daysUntil(item.expiresOn) ?? 999) <= 30 ? expiry : item.state}</button>
-    {remove && move ? <div className="item-actions"><button className="move-button" onClick={() => move(item)}>移动</button><button className="delete-button" onClick={() => remove(item)} aria-label={`移除${item.name}`}>×</button></div> : <button className="more" onClick={() => changeState(item)} aria-label={`${item.name}切换状态`}>•••</button>}
+    {remove && move && edit ? <div className="item-actions"><button className="edit-button" onClick={() => edit(item)}>编辑</button><button className="move-button" onClick={() => move(item)}>移动</button><button className="delete-button" onClick={() => remove(item)} aria-label={`移除${item.name}`}>×</button></div> : <button className="more" onClick={() => changeState(item)} aria-label={`${item.name}切换状态`}>•••</button>}
   </article>;
 }
 
@@ -250,10 +270,13 @@ function SpacesView({ spaces, openItems }: { spaces: [string, InventoryItem[]][]
   return <section className="spaces-grid">{spaces.map(([room, items]) => <button className="space-card" onClick={() => openItems(room)} key={room}><span className="space-icon">{icons[room] ?? "⌑"}</span><div><h2>{room}</h2><p>{items.length} 件物品</p></div><span className="space-arrow">→</span></button>)}</section>;
 }
 
-function ItemModal({ close, save }: { close: () => void; save: (body: ItemInputPayload) => Promise<void> }) {
-  const [saving, setSaving] = useState(false); const [message, setMessage] = useState(""); const [icon, setIcon] = useState("📦");
+function ItemModal({ item, close, save }: { item?: InventoryItem; close: () => void; save: (body: ItemInputPayload) => Promise<void> }) {
+  const [saving, setSaving] = useState(false); const [message, setMessage] = useState(""); const [icon, setIcon] = useState(item?.icon ?? "📦");
+  const iconOptions = item && !itemIconOptions.some((option) => option.value === item.icon)
+    ? [{ value: item.icon, label: "当前" }, ...itemIconOptions]
+    : itemIconOptions;
   const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setSaving(true); setMessage(""); const form = new FormData(event.currentTarget); try { await save({ type: "item", name: String(form.get("name")), icon, location: String(form.get("location")), state: String(form.get("state")) as ItemState, expiresOn: String(form.get("expiresOn")) || null }); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "保存失败"); setSaving(false); } };
-  return <Modal title="记一件家里的东西" subtitle="只填名称和位置也完全可以" close={close}><form onSubmit={submit} className="modal-form"><label>物品名称<input name="name" required autoFocus placeholder="例如：黑胡椒" /></label><fieldset><legend>选择一个图标</legend><div className="icon-choices">{["📦","🥛","🥫","🧴","💊","🔋","🧻","🧸"].map((value) => <button type="button" className={icon === value ? "selected" : ""} onClick={() => setIcon(value)} key={value}>{value}</button>)}</div></fieldset><label>放在哪里<input name="location" required placeholder="例如：厨房 · 吊柜" /></label><div className="form-row"><label>现在有多少<select name="state" defaultValue="充足">{stateOrder.map((state) => <option key={state}>{state}</option>)}</select></label><label>到期日（可不填）<input type="date" name="expiresOn" /></label></div>{message && <p className="form-error">{message}</p>}<button className="primary-submit" disabled={saving}>{saving ? "正在记下…" : "记好了"}</button></form></Modal>;
+  return <Modal title={item ? `编辑“${item.name}”` : "记一件家里的东西"} subtitle={item ? "修改后会保留原来的物品记录" : "只填名称和位置也完全可以"} close={close}><form onSubmit={submit} className="modal-form"><label>物品名称<input name="name" required autoFocus defaultValue={item?.name} maxLength={100} placeholder="例如：黑胡椒" /></label><fieldset><legend>物品分类</legend><div className="icon-choices">{iconOptions.map((option) => <button type="button" className={icon === option.value ? "selected" : ""} onClick={() => setIcon(option.value)} aria-pressed={icon === option.value} key={option.value}><span>{option.value}</span><small>{option.label}</small></button>)}</div></fieldset><label>放在哪里<input name="location" required defaultValue={item?.location} maxLength={100} placeholder="例如：厨房 · 吊柜" /></label><div className="form-row"><label>现在有多少<select name="state" defaultValue={item?.state ?? "充足"}>{stateOrder.map((state) => <option key={state}>{state}</option>)}</select></label><label>到期日（可不填）<input type="date" name="expiresOn" defaultValue={item?.expiresOn ?? ""} /></label></div>{message && <p className="form-error">{message}</p>}<button className="primary-submit" disabled={saving}>{saving ? "正在保存…" : item ? "保存修改" : "记好了"}</button></form></Modal>;
 }
 type ItemInputPayload = { type: "item"; name: string; icon: string; location: string; state: ItemState; expiresOn: string | null };
 
