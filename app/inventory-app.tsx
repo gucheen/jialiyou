@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-type View = "today" | "items" | "shopping" | "spaces";
+export type View = "today" | "items" | "shopping" | "spaces";
 type ItemState = "充足" | "不多了" | "快用完" | "已用完";
 type InventoryItem = { id: number; name: string; icon: string; location: string; state: ItemState; expiresOn: string | null; updatedAt: string };
 type ShoppingItem = { id: number; name: string; quantity: string; checked: number | boolean };
@@ -30,6 +32,7 @@ const itemIconOptions = [
 ] as const;
 const viewNames: Record<View, string> = { today: "今天", items: "全部物品", shopping: "购物清单", spaces: "空间" };
 const viewIcons: Record<View, string> = { today: "⌂", items: "▦", shopping: "✓", spaces: "⌑" };
+const viewPaths: Record<View, string> = { today: "/today", items: "/items", shopping: "/shopping", spaces: "/spaces" };
 
 function daysUntil(date: string | null) {
   if (!date) return null;
@@ -56,9 +59,9 @@ function statusTone(item: InventoryItem) {
   return "orange";
 }
 
-export default function InventoryApp({ username }: { username: string }) {
+export default function InventoryApp({ username, view }: { username: string; view: View }) {
+  const router = useRouter();
   const [data, setData] = useState<HomeData>({ items: [], shopping: [], movements: [] });
-  const [view, setView] = useState<View>("today");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -129,9 +132,9 @@ export default function InventoryApp({ username }: { username: string }) {
   };
 
   const openItems = (needsAttention = false) => {
-    setView("items");
     setAttentionOnly(needsAttention);
     setQuery("");
+    router.push(viewPaths.items);
   };
 
   const changeState = async (item: InventoryItem, state?: ItemState) => {
@@ -170,12 +173,12 @@ export default function InventoryApp({ username }: { username: string }) {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView("today")}><span className="brand-mark">有</span><span>家里有</span></button>
+        <Link className="brand" href={viewPaths.today}><span className="brand-mark">有</span><span>家里有</span></Link>
         <nav className="nav-list" aria-label="主要导航">
           {(Object.keys(viewNames) as View[]).map((key) => (
-            <button className={`nav-item ${view === key ? "active" : ""}`} onClick={() => setView(key)} key={key} aria-current={view === key ? "page" : undefined}>
+            <Link className={`nav-item ${view === key ? "active" : ""}`} href={viewPaths[key]} key={key} aria-current={view === key ? "page" : undefined}>
               <span>{viewIcons[key]}</span>{viewNames[key]}{key === "shopping" && activeShopping.length > 0 ? <b>{activeShopping.length}</b> : null}
-            </button>
+            </Link>
           ))}
         </nav>
         <div className="sidebar-bottom"><div className="family-avatars"><span>{username.slice(0, 1).toUpperCase()}</span></div><p>{username}</p><small>已安全登录</small><form action="/api/auth/logout" method="post"><button className="logout-button">退出登录</button></form></div>
@@ -196,7 +199,7 @@ export default function InventoryApp({ username }: { username: string }) {
             {view === "today" && <TodayView items={attentionItems} shopping={activeShopping} openItems={openItems} setModal={setModal} changeState={changeState} toggleShopping={toggleShopping} />}
             {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} edit={setEditingItem} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
             {view === "shopping" && <ShoppingView items={data.shopping} toggle={toggleShopping} add={() => setModal("shopping")} remove={(item) => mutate("DELETE", { type: "shopping", id: item.id }, "已移除清单项")} />}
-            {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setView("items"); setQuery(room); setAttentionOnly(false); }} />}
+            {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setQuery(room); setAttentionOnly(false); router.push(viewPaths.items); }} />}
           </>
         )}
       </section>
