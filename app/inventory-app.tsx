@@ -34,6 +34,19 @@ const viewNames: Record<View, string> = { today: "今天", items: "全部物品"
 const viewIcons: Record<View, string> = { today: "⌂", items: "▦", shopping: "✓", spaces: "⌑" };
 const viewPaths: Record<View, string> = { today: "/today", items: "/items", shopping: "/shopping", spaces: "/spaces" };
 
+function itemsPath(query = "", attentionOnly = false, space = "") {
+  const params = new URLSearchParams();
+  if (space) params.set("space", space);
+  else if (query) params.set("q", query);
+  if (attentionOnly) params.set("attention", "1");
+  const search = params.toString();
+  return search ? `${viewPaths.items}?${search}` : viewPaths.items;
+}
+
+function spaceName(location: string) {
+  return location.split("·")[0].trim();
+}
+
 function daysUntil(date: string | null) {
   if (!date) return null;
   const today = new Date();
@@ -59,13 +72,14 @@ function statusTone(item: InventoryItem) {
   return "orange";
 }
 
-export default function InventoryApp({ username, view }: { username: string; view: View }) {
+export default function InventoryApp({ username, view, initialQuery = "", initialAttentionOnly = false, initialSpace = "" }: { username: string; view: View; initialQuery?: string; initialAttentionOnly?: boolean; initialSpace?: string }) {
   const router = useRouter();
   const [data, setData] = useState<HomeData>({ items: [], shopping: [], movements: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [query, setQuery] = useState(initialQuery);
+  const [attentionOnly, setAttentionOnly] = useState(initialAttentionOnly);
+  const [selectedSpace, setSelectedSpace] = useState(initialSpace);
   const [modal, setModal] = useState<"item" | "shopping" | "audit" | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [movingItem, setMovingItem] = useState<InventoryItem | null>(null);
@@ -88,6 +102,11 @@ export default function InventoryApp({ username, view }: { username: string; vie
   }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    setQuery(initialQuery);
+    setAttentionOnly(initialAttentionOnly);
+    setSelectedSpace(initialSpace);
+  }, [initialQuery, initialAttentionOnly, initialSpace]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => { setToast(""); setUndoMovement(null); }, undoMovement ? 5000 : 2200);
@@ -134,7 +153,25 @@ export default function InventoryApp({ username, view }: { username: string; vie
   const openItems = (needsAttention = false) => {
     setAttentionOnly(needsAttention);
     setQuery("");
-    router.push(viewPaths.items);
+    setSelectedSpace("");
+    router.push(itemsPath("", needsAttention));
+  };
+
+  const replaceItemsPath = (nextQuery: string, nextAttentionOnly: boolean, nextSpace = selectedSpace) => {
+    window.history.replaceState(null, "", itemsPath(nextQuery, nextAttentionOnly, nextSpace));
+  };
+
+  const changeQuery = (value: string) => {
+    const nextSpace = value === selectedSpace ? selectedSpace : "";
+    setQuery(value);
+    setSelectedSpace(nextSpace);
+    replaceItemsPath(value, attentionOnly, nextSpace);
+  };
+
+  const toggleAttentionOnly = () => {
+    const next = !attentionOnly;
+    setAttentionOnly(next);
+    replaceItemsPath(query, next, selectedSpace);
   };
 
   const changeState = async (item: InventoryItem, state?: ItemState) => {
@@ -154,13 +191,14 @@ export default function InventoryApp({ username, view }: { username: string; vie
   const attentionItems = useMemo(() => data.items.filter((item) => item.state !== "充足" || (daysUntil(item.expiresOn) ?? 999) <= 30), [data.items]);
   const filteredItems = useMemo(() => data.items.filter((item) => {
     const matches = `${item.name}${item.location}${item.state}`.toLowerCase().includes(query.toLowerCase());
-    return matches && (!attentionOnly || attentionItems.some((entry) => entry.id === item.id));
-  }), [data.items, query, attentionOnly, attentionItems]);
+    const matchesSpace = !selectedSpace || spaceName(item.location) === selectedSpace;
+    return matches && matchesSpace && (!attentionOnly || attentionItems.some((entry) => entry.id === item.id));
+  }), [data.items, query, selectedSpace, attentionOnly, attentionItems]);
   const activeShopping = data.shopping.filter((item) => !Boolean(item.checked));
   const spaces = useMemo(() => {
     const groups = new Map<string, InventoryItem[]>();
     data.items.forEach((item) => {
-      const room = item.location.split("·")[0].trim();
+      const room = spaceName(item.location);
       groups.set(room, [...(groups.get(room) ?? []), item]);
     });
     return Array.from(groups.entries());
@@ -197,9 +235,9 @@ export default function InventoryApp({ username, view }: { username: string; vie
         {loading ? <LoadingState /> : error ? <ErrorState message={error} retry={loadData} /> : (
           <>
             {view === "today" && <TodayView items={attentionItems} shopping={activeShopping} openItems={openItems} setModal={setModal} changeState={changeState} toggleShopping={toggleShopping} />}
-            {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={setQuery} attentionOnly={attentionOnly} setAttentionOnly={setAttentionOnly} changeState={changeState} edit={setEditingItem} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
+            {view === "items" && <ItemsView items={filteredItems} movements={data.movements} query={query} setQuery={changeQuery} attentionOnly={attentionOnly} toggleAttentionOnly={toggleAttentionOnly} changeState={changeState} edit={setEditingItem} move={setMovingItem} remove={async (item) => { if (window.confirm(`确定移除“${item.name}”吗？`)) await mutate("DELETE", { type: "item", id: item.id }, "已从家里移除"); }} />}
             {view === "shopping" && <ShoppingView items={data.shopping} toggle={toggleShopping} add={() => setModal("shopping")} remove={(item) => mutate("DELETE", { type: "shopping", id: item.id }, "已移除清单项")} />}
-            {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setQuery(room); setAttentionOnly(false); router.push(viewPaths.items); }} />}
+            {view === "spaces" && <SpacesView spaces={spaces} openItems={(room) => { setQuery(room); setAttentionOnly(false); setSelectedSpace(room); router.push(itemsPath(room, false, room)); }} />}
           </>
         )}
       </section>
@@ -237,10 +275,10 @@ function TodayView({ items, shopping, openItems, setModal, changeState, toggleSh
   </>;
 }
 
-function ItemsView({ items, movements, query, setQuery, attentionOnly, setAttentionOnly, changeState, edit, move, remove }: { items: InventoryItem[]; movements: Movement[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; setAttentionOnly: (value: boolean) => void; changeState: (item: InventoryItem, state?: ItemState) => void; edit: (item: InventoryItem) => void; move: (item: InventoryItem) => void; remove: (item: InventoryItem) => void }) {
+function ItemsView({ items, movements, query, setQuery, attentionOnly, toggleAttentionOnly, changeState, edit, move, remove }: { items: InventoryItem[]; movements: Movement[]; query: string; setQuery: (value: string) => void; attentionOnly: boolean; toggleAttentionOnly: () => void; changeState: (item: InventoryItem, state?: ItemState) => void; edit: (item: InventoryItem) => void; move: (item: InventoryItem) => void; remove: (item: InventoryItem) => void }) {
   return <>
   <section className="full-panel">
-    <div className="list-tools"><label className="search-field"><span>⌕</span><input autoFocus placeholder="搜索名称、位置或状态" value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className={`filter-button ${attentionOnly ? "selected" : ""}`} onClick={() => setAttentionOnly(!attentionOnly)}>只看需留意</button></div>
+    <div className="list-tools"><label className="search-field"><span>⌕</span><input autoFocus placeholder="搜索名称、位置或状态" value={query} onChange={(event) => setQuery(event.target.value)} /></label><button className={`filter-button ${attentionOnly ? "selected" : ""}`} onClick={toggleAttentionOnly}>只看需留意</button></div>
     <div className="table-head"><span>物品</span><span>位置</span><span>状态</span><span></span></div>
     <div className="full-list">{items.map((item) => <ItemRow item={item} key={item.id} changeState={changeState} edit={edit} move={move} remove={remove} expanded />)}{!items.length && <EmptyMini text="没有找到符合条件的物品" />}</div>
   </section>
